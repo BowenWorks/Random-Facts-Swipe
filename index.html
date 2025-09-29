@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>随机科普 左右滑 by Wernacular©</title>
+<style>
+  :root{ --bg:#0b1015; --card:#0f1720; --muted:#9aa6b2; --accent:#7dd3fc; }
+  *{box-sizing:border-box}
+  html,body{
+    height:100%;
+    margin:0;
+    background: url('./backgound_right.png') no-repeat center center fixed;
+    background-size: cover;
+    color:#e6f0f6;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Helvetica Neue', Arial;
+    overflow:hidden; /* prevent scrolling */
+    touch-action:none; /* disable default scrolling and pinch zoom on touch devices */
+  }
+  .app{height:100%;display:flex;flex-direction:column;align-items:center;padding:14px}
+  header{width:100%;max-width:420px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .title{font-weight:600;font-size:15px}
+  .controls{display:flex;gap:8px;align-items:center}
+  .small{font-size:13px;color:var(--muted)}
+  .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:6px 10px;border-radius:10px;color:var(--muted);font-weight:600}
+
+  /* deck */
+  .stage{width:100%;max-width:420px;height:64vh;max-height:740px;position:relative;display:flex;align-items:center;justify-content:center}
+  .card{width:92%;height:78%;position:absolute;border-radius:14px;box-shadow:0 14px 30px rgba(2,6,23,0.7);background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));overflow:hidden;display:flex;flex-direction:column}
+  .thumb{height:48%;background:#071a22;display:flex;align-items:center;justify-content:center}
+  .thumb img{width:100%;height:100%;object-fit:cover}
+  .body{padding:12px;flex:1;display:flex;flex-direction:column}
+  .body::-webkit-scrollbar {
+    display: none;
+  }
+  .h{font-size:16px;font-weight:700;margin-bottom:6px}
+  .p{
+    font-size:14px;
+    color:var(--muted);
+    line-height:1.35;
+    overflow:auto;
+    flex:1;
+    margin-bottom:8px;
+  }
+  .meta{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+  .chip{font-size:12px;color:var(--muted)}
+
+  /* hint */
+  .hint{margin-top:12px;color:var(--muted);font-size:13px}
+
+  /* saved list modal */
+  .modal{position:fixed;left:0;right:0;bottom:0;top:0;display:none;align-items:center;justify-content:center;background:rgba(2,6,23,0.6);padding:18px}
+  .modal.open{display:flex}
+  .sheet{width:100%;max-width:420px;background:linear-gradient(180deg,#081724,#07131a);border-radius:12px;padding:12px;max-height:80vh;overflow:auto}
+  .item{padding:8px 6px;border-bottom:1px solid rgba(255,255,255,0.03);}
+  .item .t{font-weight:700}
+  .footer{display:flex;gap:8px;margin-top:10px}
+
+  /* small screens tweaks */
+  @media (max-width:390px){ .card{border-radius:12px} .h{font-size:15px} }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title">随机科普 左右滑 by Wernacular©</div>
+      <div class="controls">
+        <select id="lang" class="btn" aria-label="语言">
+          <option value="en">EN</option>
+          <option value="zh">中文</option>
+        </select>
+        <button id="savedBtn" class="btn">已收藏 <span id="savedCount">0</span></button>
+      </div>
+    </header>
+
+    <div class="stage" id="stage" aria-live="polite">
+      <!-- cards 插入在这里 -->
+      <div id="emptyHint" style="color:var(--muted);position:absolute;text-align:center;max-width:320px">正在准备卡片...（轻推或用下方按钮）</div>
+    </div>
+
+    <div style="width:100%;max-width:420px;display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <button id="skipBtn" class="btn">← 跳过</button>
+      <div class="hint">右滑收藏 · 左滑跳过 · 再滑会加载下一条</div>
+      <button id="nextBtn" class="btn">刷新 →</button>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <div class="modal" id="modal">
+      <div class="sheet">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-weight:700">已收藏</div>
+          <div><button id="closeModal" class="btn">关闭</button></div>
+        </div>
+        <div id="savedList"></div>
+        <div class="footer">
+          <button id="clearSaved" class="btn">清空</button>
+          <a id="downloadSaved" class="btn" href="#" download="saved_wiki.json">下载 JSON</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const stage = document.getElementById('stage');
+  const langSel = document.getElementById('lang');
+  const savedBtn = document.getElementById('savedBtn');
+  const savedCountEl = document.getElementById('savedCount');
+  const modal = document.getElementById('modal');
+  const savedList = document.getElementById('savedList');
+  const closeModal = document.getElementById('closeModal');
+  const clearSaved = document.getElementById('clearSaved');
+  const downloadSaved = document.getElementById('downloadSaved');
+  const skipBtn = document.getElementById('skipBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const emptyHint = document.getElementById('emptyHint');
+
+  let saved = JSON.parse(localStorage.getItem('wiki_saved')||'[]');
+  let buffer = []; // preload buffer of items
+  let currentCard = null;
+
+  function updateSavedCount(){ savedCountEl.innerText = saved.length; }
+  updateSavedCount();
+
+  function saveLocal(){ localStorage.setItem('wiki_saved', JSON.stringify(saved)); updateSavedCount(); }
+
+  async function fetchRandom(lang){
+    const endpoint = (lang==='en')? 'https://en.wikipedia.org/api/rest_v1/page/random/summary' : `https://${lang}.wikipedia.org/api/rest_v1/page/random/summary`;
+    try{
+      const r = await fetch(endpoint, {cache:'no-store'});
+      if(!r.ok) throw new Error('fetch failed');
+      const j = await r.json();
+      return { title:j.title, extract:j.extract||j.description||'', thumbnail:j.thumbnail?.source||j.originalimage?.source||null, url:j.content_urls?.desktop?.page || (`https://${lang}.wikipedia.org/wiki/` + encodeURIComponent(j.title)) };
+    }catch(e){ return { title:'获取失败', extract:'无法从维基百科取得条目，请检查网络。', thumbnail:null, url:'#' } }
+  }
+
+  // create card DOM
+  function makeCard(data){
+    const el = document.createElement('div'); el.className='card';
+    el.style.transform='translate(0,0) rotate(0deg)';
+    el.innerHTML = `
+      <div class="thumb">${data.thumbnail?'<img src="'+data.thumbnail+'" alt="thumb">':'<div style="color:var(--muted);font-size:14px">No image</div>'}</div>
+      <div class="body">
+        <div class="h">${escapeHtml(data.title)}</div>
+        <div class="p" style="overflow-y:auto;max-height:calc(52% - 10px)">${escapeHtml(data.extract)}</div>
+        <div class="meta"><div class="chip">来源</div><a class="btn" href="${data.url}" target="_blank" rel="noreferrer">打开条目</a></div>
+      </div>`;
+    // attach pointer handlers
+    attachDrag(el, data);
+    return el;
+  }
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c])); }
+
+  // drag logic
+  function attachDrag(el, data){
+    let startX=0, startY=0, curX=0, curY=0, dragging=false;
+    const threshold = 100; // px to trigger swipe
+    function onPointerDown(e){
+      dragging=true; el.setPointerCapture(e.pointerId); startX = e.clientX; startY = e.clientY;
+      el.style.transition='none';
+    }
+    function onPointerMove(e){ if(!dragging) return; curX = e.clientX - startX; curY = e.clientY - startY; const rot = curX/12; el.style.transform = `translate(${curX}px, ${curY}px) rotate(${rot}deg)`; }
+    function onPointerUp(e){ if(!dragging) return; dragging=false; el.releasePointerCapture(e.pointerId); el.style.transition='transform 200ms ease';
+      if(curX > threshold){ // right - save
+        el.style.transform = `translate(${window.innerWidth}px, ${curY}px) rotate(20deg)`;
+        setTimeout(()=>{ onSwipe('right', data); el.remove(); }, 220);
+      } else if(curX < -threshold){ // left - skip
+        el.style.transform = `translate(-${window.innerWidth}px, ${curY}px) rotate(-20deg)`;
+        setTimeout(()=>{ onSwipe('left', data); el.remove(); }, 220);
+      } else { // restore
+        el.style.transform = 'translate(0px,0px) rotate(0deg)';
+      }
+      curX = 0; curY = 0;
+    }
+    el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+
+    // also support quick programmatic actions
+    el.dataset.title = data.title;
+  }
+
+  function onSwipe(dir, data){
+    if(dir === 'right'){
+      // de-dup by title
+      if(!saved.find(s=>s.title===data.title)) saved.unshift(data);
+      saveLocal();
+    }
+    // after swipe, load next card
+    showNextFromBuffer();
+  }
+
+  // preload a small buffer
+  async function fillBuffer(n=3){
+    const lang = langSel.value === 'zh' ? 'zh' : 'en';
+    while(buffer.length < n){ buffer.push(await fetchRandom(lang)); }
+  }
+
+  // show next: ensure only one card remains, remove old cards and event listeners
+  function showNextFromBuffer(){
+    if(buffer.length===0){
+        emptyHint.style.display='block';
+        return;
+    }
+    emptyHint.style.display='none';
+
+    // remove all .card elements completely before adding new one
+    const existingCards = stage.querySelectorAll('.card');
+    existingCards.forEach(cardEl => {
+        // remove any attached pointer events to avoid leaks
+        cardEl.replaceWith();
+    });
+
+    // shift next item
+    const d = buffer.shift();
+    const card = makeCard(d);
+    // append as only card
+    stage.appendChild(card);
+
+    // refill buffer
+    fillBuffer(3);
+  }
+
+  // init
+  (async function init(){
+    await fillBuffer(3);
+    // show two cards stacked
+    showNextFromBuffer();
+    showNextFromBuffer();
+  })();
+
+  // buttons
+  skipBtn.addEventListener('click', ()=>{
+    // simulate left swipe on topmost card
+    const top = stage.querySelector('.card'); if(top){ top.style.transition='transform 220ms ease'; top.style.transform = `translate(-${window.innerWidth}px,0) rotate(-20deg)`; setTimeout(()=>{ const data = { title: top.dataset?.title || 'skip' }; top.remove(); showNextFromBuffer(); }, 220); }
+  });
+  nextBtn.addEventListener('click', ()=>{ // programmatic fetch next: simply show next
+    showNextFromBuffer();
+  });
+
+  // saved modal
+  savedBtn.addEventListener('click', ()=>{ renderSaved(); modal.classList.add('open'); });
+  closeModal.addEventListener('click', ()=>{ modal.classList.remove('open'); });
+  clearSaved.addEventListener('click', ()=>{ if(confirm('清空已收藏？')){ saved=[]; saveLocal(); renderSaved(); } });
+
+  function renderSaved(){ savedList.innerHTML = saved.length? saved.map(s=>`<div class="item"><div class="t">${escapeHtml(s.title)}</div><div class="d" style="color:var(--muted);font-size:13px">${escapeHtml(s.extract||'')}</div><div style="margin-top:6px"><a class="btn" href="${s.url}" target="_blank">打开</a></div></div>`).join('') : '<div style="color:var(--muted);padding:8px">空空如也，右滑收藏一条吧</div>';
+    downloadSaved.href = 'data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(saved, null, 2));
+  }
+
+  // when language changes, clear buffer and refill
+  langSel.addEventListener('change', async ()=>{ buffer = []; // remove existing cards
+    const cards = Array.from(stage.querySelectorAll('.card')); cards.forEach(c=>c.remove()); emptyHint.style.display='block'; await fillBuffer(3); showNextFromBuffer(); showNextFromBuffer(); });
+
+  // accessibility: allow keyboard arrows
+  document.addEventListener('keydown', (e)=>{
+    if(e.key === 'ArrowLeft') skipBtn.click();
+    if(e.key === 'ArrowRight'){
+      // emulate right swipe
+      const top = stage.querySelector('.card'); if(top){ const title = top.dataset?.title || ''; const data = { title }; if(!saved.find(s=>s.title===title)) { saved.unshift({ title, extract:'', url:'#' }); saveLocal(); } top.style.transition='transform 220ms ease'; top.style.transform = `translate(${window.innerWidth}px,0) rotate(20deg)`; setTimeout(()=>{ top.remove(); showNextFromBuffer(); }, 220); }
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
